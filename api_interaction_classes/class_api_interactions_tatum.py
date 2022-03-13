@@ -7,44 +7,77 @@ import time
 from pathlib import Path
 from urllib.parse import urlunsplit, urlencode
 from typing import Union
+from class_timer import Timer
 
 
 class TatumAPIinteractions:
     """
-    This class provides the ability to interact with the Tatum API.
+        This class provides the ability to interact with the Tatum API.
     """
 
     # URL components
     __api_scheme = 'https'
     __api_network_location = 'api-us-west1.tatum.io'
 
-    # NEED SOMETHING HERE FOR SPEED THROTTLING
+    # default headers
+    __request_headers = {
+        "Accept": "text/html",
+        "Accept-Language": "en-US,en;q=0.5",
+        "User-Agent": "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:97.0) Gecko/20100101 Firefox/97.0"
+    }
 
-    def __init__(self, full_path_to_credentials_file: Path, page_size=50):
+    def __init__(self, full_path_to_credentials_file: Path, rate_limit: int = 5, page_size: int = 50):
         """Initialize an instance of the class.
           Args:
-            full_path_to_credentials_file: a json formatted file (as a posix path) that has
-                Brightcove client id and secret.
+            full_path_to_credentials_file: a json formatted file (as a posix path) that has API key.
+            rate_limit: the number of calls that one is allowed to make to the API per second. eg. 5
             page_size: the number of items to get from the API, for calls where information
                 is being retrieved, and the API returns a certain number of objects per
                 page.
           """
         self.__path_to_file_with_creds = full_path_to_credentials_file
         self.__page_size = page_size
-
-        with open(full_path_to_credentials_file, mode='r') as creds_file:
-            dict_creds = json.load(creds_file)
+        # start the timer that keeps track of whether an API call is allowed
+        # yet or not based on the rate limit
+        self.__timer = Timer(rate_limit=rate_limit)
+        self.__timer.reset()
 
         # start a python requests session
-        self.sesh = requests.session()
-        self.__request_headers = {
-            "Accept": "text/html",
-            "Accept-Language": "en-US,en;q=0.5",
-            "User-Agent": "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:97.0) Gecko/20100101 Firefox/97.0",
-            "x-api-key": dict_creds['api_key_free_mainnet']
-        }
-        self.sesh.headers.clear()
-        self.sesh.headers.update(self.__request_headers)
+        self.__sesh = requests.session()
+        self.__reset_headers()
+    # ------------------------ END FUNCTION ------------------------ #
+
+    def get_current_ethereum_block_number(self, testnet: str = "") -> int:
+        """
+            This method gets the current block number.
+            NOTE: From my testing (not very thorough) it looks like the API
+                will always return the current block of mainnet, IF the api key used
+                is for mainnet - even if the headers specify a testnet. I'm guessing
+                the converse is also true; likely if a testnet api key is used,
+                the reply will be for testnet no matter what, but in that case, WHICH
+                testnet can be specified.
+            Args:
+              testnet: If this value is ommitted, then mainnet is used. Possible values are "ethereum-ropsten",
+                "ethereum-ropsten", "ethereum-rinkeby"
+            Returns:
+              The current block.
+        """
+        api_path = "/v3/ethereum/block/current"
+        if testnet:
+            header_to_add = {
+                "x-testnet-type": testnet
+            }
+            self.__sesh.headers.update(header_to_add)
+
+        block = self.__make_one_api_call(self.__api_network_location,
+                                         api_path)
+
+        if testnet:
+            # in case other methods still need to use the requests session, we'll reset the headers,
+            # which in this case means removing the 'testnet' header if it was provided
+            self.__reset_headers()
+
+        return block
     # ------------------------ END FUNCTION ------------------------ #
 
     def get_multi_token_transactions_by_address(self,
@@ -52,18 +85,25 @@ class TatumAPIinteractions:
                                                 contract_address: str,
                                                 chain: str = "ETH",
                                                 from_block: int = -1,
-                                                to_block: int = -1) -> []:
+                                                to_block: int = -1) -> pd.DataFrame:
         """
-          This method .
+          This method gets all the transactions for a multitoken type of contract (example, on Ethereum
+          an ERC1155 type of contract) for a specific address that has interacted with that contract.
           Args:
-              br
+              account_address: the account that one is interested in looking at the transactions for (usually
+                an EOA, but not necessarily.)
+              contract_address: the address of the contract on the blockchain.
+              chain: a string that represents the chain one is interested in.
+              from_block: the starting block, eg. one is interested only in transactions that happened
+                after block number X
+              to_block: if one is only interested in transactions up to a certain point, this parameter
+                can be used to specify an upper limit on the blocks.
           Returns:
-              A l.
+              A pandas dataframe with the data.
         """
         api_path = f"/v3/multitoken/transaction/{chain}/{account_address}/{contract_address}"
         dict_api_query_params = {
-            "pageSize": self.__page_size,
-            "offset": 200
+            "pageSize": self.__page_size
         }
         if from_block > -1:
             dict_api_query_params["from"] = from_block
@@ -183,6 +223,7 @@ class TatumAPIinteractions:
         else:
             return
 
+        self.__timer.wait_until_allowed(include_reset=True)
         try:
             raw_response = api_method(*api_method_args)
         except Exception as e:
@@ -191,15 +232,11 @@ class TatumAPIinteractions:
             return
 
         if raw_response.content:
-            # deal appropriately with the response received
-            if 'application/json' in raw_response.headers['Content-Type']:
+            try:
                 response_object = json.loads(raw_response.content)
-            elif 'text/plain' in raw_response.headers['Content-Type']:
-                response_object = raw_response.content
-            # elif 'application/rss+xml' in raw_response.headers['Content-Type']:
-            #     response_object = xmltodict.parse(raw_response.text)
-            else:
-                logging.error(f"Unknown content type {raw_response.headers['Content-Type']} for api_url: {api_url}")
+            except Exception as e:
+                logging.warning('Something went wrong while extracting the received data.'
+                                + ' -- The Exception was: ' + repr(e))
 
         end_time = time.time()
 
@@ -233,13 +270,13 @@ class TatumAPIinteractions:
         api_method_args = ()
 
         if call_type == 'get':
-            api_method = self.sesh.get
+            api_method = self.__sesh.get
         elif call_type == 'post':
-            api_method = self.sesh.post
+            api_method = self.__sesh.post
         elif call_type == 'put':
-            api_method = self.sesh.put
+            api_method = self.__sesh.put
         elif call_type == 'delete':
-            api_method = self.sesh.delete
+            api_method = self.__sesh.delete
         else:
             logging.error("Unexpected api call type passed in the 'call_type' argument to method "
                           "'__make_one_api_call'. API call is not being executed.")
@@ -253,4 +290,12 @@ class TatumAPIinteractions:
             dict_to_return["args"] = api_method_args
 
         return dict_to_return
+    # ------------------------ END FUNCTION ------------------------ #
+
+    def __reset_headers(self):
+        with open(self.__path_to_file_with_creds, mode='r') as creds_file:
+            dict_creds = json.load(creds_file)
+        self.__sesh.headers.clear()
+        self.__sesh.headers.update(self.__request_headers)
+        self.__sesh.headers.update({"x-api-key": dict_creds['api_key_free_mainnet']})
     # ------------------------ END FUNCTION ------------------------ #

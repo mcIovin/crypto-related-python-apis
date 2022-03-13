@@ -1,3 +1,4 @@
 .idea/
 .python-version
 test_scripts/*
+*pycache*
