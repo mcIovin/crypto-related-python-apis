@@ -79,6 +79,74 @@ class MoralisAPIinteractions:
                                                  dict_api_query_params)
     # ------------------------ END FUNCTION ------------------------ #
 
+    def get_an_nft_tokens_metadata(self,
+                                   contract_address: str,
+                                   token_id: str,
+                                   chain: str = "eth",
+                                   format: str = "") -> dict:
+        """
+          This method gets the metadata for a specific token in a contract.
+          Args:
+              contract_address: the account that one is interested in looking at the transactions for (usually
+                an EOA, but not necessarily.)
+              token_id: the id of the NFT for which to get the metadata.
+              chain: a string that represents the chain one is interested in. Eg, eth, ropsten, matic, etc.
+              format: 'decimal' or 'hex' (decimal is default).
+          Returns:
+              A dictionary with the data.
+        """
+        api_path = f"/api/v2/nft/{contract_address}/{token_id}"
+
+        dict_api_query_params = {
+            "chain": chain
+        }
+        if format:
+            dict_api_query_params["format"] = format
+
+        return self.__make_one_api_call(self.__api_network_location,
+                                        api_path,
+                                        dict_api_query_params)
+    # ------------------------ END FUNCTION ------------------------ #
+
+    def get_many_nft_tokens_metadata(self,
+                                     contract_address: str,
+                                     token_ids: Union[list, set, tuple, pd.Series],
+                                     chain: str = "eth",
+                                     format: str = "") -> pd.DataFrame:
+        """
+          This method gets the metadata for several NFT tokens.
+          Args:
+              contract_address: the account that one is interested in looking at the transactions for (usually
+                an EOA, but not necessarily.)
+              token_ids: any iterable where each item is a string representing a token id.
+              chain: a string that represents the chain one is interested in. Eg, eth, ropsten, matic, etc.
+              format: 'decimal' or 'hex' (decimal is default).
+          Returns:
+              A pandas dataframe with the data.
+        """
+        dict_api_query_params = {
+            "chain": chain
+        }
+        if format:
+            dict_api_query_params["format"] = format
+
+        list_of_tokens = []
+        percent_tracker = PercentTracker(len(token_ids))
+        counter = 0
+        for item in token_ids:
+            list_of_tokens.append(
+                self.get_an_nft_tokens_metadata(contract_address,
+                                                item,
+                                                chain,
+                                                format)
+            )
+            counter += 1
+            percent_tracker.update_progress(counter,
+                                            str_description_to_include_in_logging="Getting a list of NFT's metadata.")
+        return pd.DataFrame(list_of_tokens)
+    # ------------------------ END FUNCTION ------------------------ #
+
+
     def __get_full_data_set_from_api(self,
                                      api_endpoint: str,
                                      api_url_path: str,
