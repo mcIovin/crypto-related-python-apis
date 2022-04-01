@@ -1,6 +1,14 @@
 import sys
 import logging
 from logging.handlers import RotatingFileHandler
+from urllib.parse import urlparse
+from pathlib import Path
+
+
+def get_last_segment_of_url(url: str) -> str:
+    decomposed = urlparse(url)
+    path = Path(decomposed.path)
+    return path.name
 
 
 def setup_logging(destination='console', # noqa: C901
