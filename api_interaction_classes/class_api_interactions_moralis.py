@@ -87,8 +87,7 @@ class MoralisAPIinteractions:
         """
           This method gets the metadata for a specific token in a contract.
           Args:
-              contract_address: the account that one is interested in looking at the transactions for (usually
-                an EOA, but not necessarily.)
+              contract_address: the address of the NFT contract
               token_id: the id of the NFT for which to get the metadata.
               chain: a string that represents the chain one is interested in. Eg, eth, ropsten, matic, etc.
               format: 'decimal' or 'hex' (decimal is default).
@@ -131,7 +130,7 @@ class MoralisAPIinteractions:
             dict_api_query_params["format"] = format
 
         list_of_tokens = []
-        percent_tracker = PercentTracker(len(token_ids))
+        percent_tracker = PercentTracker(len(token_ids), int_output_every_x_percent=5)
         counter = 0
         for item in token_ids:
             list_of_tokens.append(
