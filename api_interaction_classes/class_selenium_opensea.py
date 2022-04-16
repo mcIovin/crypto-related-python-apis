@@ -23,16 +23,20 @@ class SeleniumOnOpensea:
         self.driver = webdriver.Firefox
     # ------------------------ END FUNCTION ------------------------ #
 
-    def start_driver(self):
+    def start_driver(self, headless: bool = True):
         # initialize the Selenium webdriver for Firefox, which literally
-        # opens a browser
+        # opens a browser when running in non-headless mode.
         logging.info('Starting Selenium browser driver.')
 
-        #options = Options()
-        #options.headless = True
+        if headless:
+            options = Options()
+            options.headless = True
 
         try:
-            self.driver = webdriver.Firefox()#options=options)
+            if headless:
+                self.driver = webdriver.Firefox(options=options)
+            else:
+                self.driver = webdriver.Firefox()
         except Exception as e:
             logging.error(f"Unable to start Selenium browser driver. The exception was: "
                           f"{repr(e)}")
