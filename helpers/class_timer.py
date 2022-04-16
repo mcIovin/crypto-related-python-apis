@@ -44,7 +44,7 @@ class Timer:
         """
         ellapsed_time = time.time() - self.start_time
         if ellapsed_time < self.__limit_as_decimal:
-            print("Delaying api call in 'waint_until_allowed' method.")
+            print("Delaying api call in 'wait_until_allowed' method.")
             time.sleep(self.__limit_as_decimal - ellapsed_time)
         if include_reset:
             self.reset()
