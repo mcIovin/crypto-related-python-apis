@@ -24,13 +24,16 @@ class MoralisAPIinteractions:
         "Accept": "application/json"
     }
 
-    def __init__(self, full_path_to_credentials_file: Path, rate_limit: int = 25, page_size: int = 50):
+    def __init__(self, full_path_to_credentials_file: Path, rate_limit: int = 1, page_size: int = 50):
         """Initialize an instance of the class.
           Args:
             full_path_to_credentials_file: a json formatted file (as a posix path) that has API key.
             rate_limit: the number of calls that one is allowed to make to the API per second. On the free
               account, the moralis documentation says 1500 requests per minute are allowed, which is
-              25 per second, so this is what I've set the default to.
+              25 per second; however, each API has its own 'cost'. For example each call about NFT
+              transfers has a 'cost' of 5 API calls. So there is a body of work that could be done here
+              to make each type of call 'limited' within this class to exactly how many calls are allowed.
+              For now, I've just set the default limit to be low enough that it should work.
             page_size: the number of items to get from the API, for calls where information
                 is being retrieved, and the API returns a certain number of objects per
                 page.
@@ -79,9 +82,84 @@ class MoralisAPIinteractions:
                                                  dict_api_query_params)
     # ------------------------ END FUNCTION ------------------------ #
 
+    def resync_an_nft_tokens_metadata(self,
+                            contract_address: str,
+                            token_id: str,
+                            chain: str = "eth",
+                            print_api_response_to_console: bool = False):
+        """
+          This method gets all the NFT transactions that a particular address has been involved in (sending and/or
+          receiving.
+          Args:
+              contract_address: the address of the NFT contract
+              token_id: the id of the NFT for which to resync the metadata
+              chain: a string that represents the chain one is interested in. Eg, eth, ropsten, matic, etc.
+              print_api_response_to_console: whether the api's response should be shown on the console or not,
+                which can be quite useful, but also quite noisy if querying repeatedly.
+        """
+        api_path = f"/api/v2/nft/{contract_address}/{token_id}/metadata/resync"
+
+        dict_api_query_params = {
+            "chain": chain,
+            "flag": "uri",
+            "mode": "sync"
+        }
+
+        response = self.__make_one_api_call(self.__api_network_location,
+                                            api_path,
+                                            dict_api_query_params)
+        there_was_a_problem = False
+        if 'status' not in response:
+            there_was_a_problem = True
+        else:
+            if response['status'] != 'completed':
+                there_was_a_problem = True
+
+        if there_was_a_problem:
+            logging.warning(f"Did not receive the expected 'completed' response when resyncing metadata "
+                            f"for token_id {token_id}")
+
+        if print_api_response_to_console:
+            print(response)
+    # ------------------------ END FUNCTION ------------------------ #
+
+    def resync_many_nft_tokens_metadata(self,
+                                        contract_address: str,
+                                        token_ids: Union[list, set, tuple, pd.Series],
+                                        chain: str = "eth",
+                                        print_api_response_to_console: bool = False,
+                                        sleep_time_between_requests: float = 0):
+        """
+          This method gets the metadata for several NFT tokens.
+          Args:
+              contract_address: the account that one is interested in looking at the transactions for (usually
+                an EOA, but not necessarily.)
+              token_ids: any iterable where each item is a string representing a token id.
+              chain: a string that represents the chain one is interested in. Eg, eth, ropsten, matic, etc.
+              print_api_response_to_console: whether the api's response should be shown on the console or not,
+                which can be quite useful, but also quite noisy if querying repeatedly.
+              sleep_time_between_requests: resyncing NFT metadata seems to trigger a more sensitive rate limit
+                than other functions. This is based on experience; I can't find this in their documentation. So
+                this parameter allows for a certain amount of seconds (or fraction thereof) to be waited for, before
+                resyncing the metadata of the next token in the iterable.
+        """
+        percent_tracker = PercentTracker(len(token_ids), int_output_every_x_percent=5)
+        counter = 0
+        for item in token_ids:
+            self.resync_an_nft_tokens_metadata(contract_address, item, chain, print_api_response_to_console)
+            if sleep_time_between_requests:
+                time.sleep(sleep_time_between_requests)
+            counter += 1
+            percent_tracker.update_progress(counter,
+                                            show_time_remaining_estimate=True,
+                                            str_description_to_include_in_logging="Resyncing metadata for a list "
+                                                                                  "of NFT tokens.")
+    # ------------------------ END FUNCTION ------------------------ #
+
     def get_an_nft_tokens_metadata(self,
                                    contract_address: str,
                                    token_id: str,
+                                   list_of_metadata_fields_to_extract: list = [],
                                    chain: str = "eth",
                                    format: str = "") -> dict:
         """
@@ -89,6 +167,10 @@ class MoralisAPIinteractions:
           Args:
               contract_address: the address of the NFT contract
               token_id: the id of the NFT for which to get the metadata.
+              list_of_metadata_fields_to_extract: By default, all of the metadata stored at the URI returned
+                by the smart contract is returned in 1 column of the dataframe in json format. If a list
+                of metadata fields is provided, each of those fields is extracted from the json, and put
+                into its own column. Eg. this list might look like ['name', 'description', 'image']
               chain: a string that represents the chain one is interested in. Eg, eth, ropsten, matic, etc.
               format: 'decimal' or 'hex' (decimal is default).
           Returns:
@@ -102,14 +184,37 @@ class MoralisAPIinteractions:
         if format:
             dict_api_query_params["format"] = format
 
-        return self.__make_one_api_call(self.__api_network_location,
-                                        api_path,
-                                        dict_api_query_params)
+        dict_nft_metadata = self.__make_one_api_call(self.__api_network_location,
+                                                     api_path,
+                                                     dict_api_query_params)
+
+        # The metadata returned in json format specified by the smart contract when calling its URI
+        # function is returned all together in one field. If specified by the list_of_metadata_fields_to_extract
+        # parameter of this function, the following loop will extract certain fields from the
+        # single json metadata field and place them in the dictionary under their own heading.
+        # Another way to think of this is that Moralis returns metadata in a dictionary, with
+        # one of the fields of that dictionary being another sub-dictionary with the NFT's most interesting
+        # metadata; the loop below moves the specified fields from the 'second-level' sub dictionary
+        # to the top level parent dictionary. This is useful when multiple tokens are queried, because
+        # if they are placed in a structure like a dataframe, each of these fields will have its own
+        # column.
+        dict_metadata_from_token_uri = json.loads(dict_nft_metadata['metadata'])
+        for item in list_of_metadata_fields_to_extract:
+            if item in dict_metadata_from_token_uri:
+                dict_nft_metadata[item] = dict_metadata_from_token_uri[item]
+            else:
+                # Even if the field does not exist in the returned metadata json object
+                # we'll add it as an empty string to the dictionary to be returned
+                # for consistency.
+                dict_nft_metadata[item] = None
+
+        return dict_nft_metadata
     # ------------------------ END FUNCTION ------------------------ #
 
     def get_many_nft_tokens_metadata(self,
                                      contract_address: str,
                                      token_ids: Union[list, set, tuple, pd.Series],
+                                     list_of_metadata_fields_to_extract: list = [],
                                      chain: str = "eth",
                                      format: str = "") -> pd.DataFrame:
         """
@@ -118,6 +223,10 @@ class MoralisAPIinteractions:
               contract_address: the account that one is interested in looking at the transactions for (usually
                 an EOA, but not necessarily.)
               token_ids: any iterable where each item is a string representing a token id.
+              list_of_metadata_fields_to_extract: By default, all of the metadata stored at the URI returned
+                by the smart contract is returned in 1 column of the dataframe in json format. If a list
+                of metadata fields is provided, each of those fields is extracted from the json, and put
+                into its own column. Eg. this list might look like ['name', 'description', 'image']
               chain: a string that represents the chain one is interested in. Eg, eth, ropsten, matic, etc.
               format: 'decimal' or 'hex' (decimal is default).
           Returns:
@@ -136,15 +245,16 @@ class MoralisAPIinteractions:
             list_of_tokens.append(
                 self.get_an_nft_tokens_metadata(contract_address,
                                                 item,
+                                                list_of_metadata_fields_to_extract,
                                                 chain,
                                                 format)
             )
             counter += 1
             percent_tracker.update_progress(counter,
+                                            show_time_remaining_estimate=True,
                                             str_description_to_include_in_logging="Getting a list of NFT's metadata.")
         return pd.DataFrame(list_of_tokens)
     # ------------------------ END FUNCTION ------------------------ #
-
 
     def __get_full_data_set_from_api(self,
                                      api_endpoint: str,
@@ -201,7 +311,7 @@ class MoralisAPIinteractions:
             # When all the results have been returned, the list at api_response['result'] will be empty,
             # and the cursor at api_response['cursor'] will be the empty string.
             # Either can be used to determine if the loop should end. One can also use the number of items
-            # per ages in conjunctions with 'offset' to do pagination, but cursors get rid of the risk of
+            # per pages in conjunctions with 'offset' to do pagination, but cursors get rid of the risk of
             # missing/duplicate items when a data set might be changing.
             cursor = api_response['cursor']
             if cursor:
@@ -273,7 +383,7 @@ class MoralisAPIinteractions:
 
         self.__timer.wait_until_allowed(include_reset=True)
         try:
-            raw_response = api_method(*api_method_args)
+            raw_response = api_method(*api_method_args, timeout=30)
         except Exception as e:
             logging.warning('Something went wrong while retrieving data from ' + api_url
                             + ' -- The Exception was: ' + repr(e))

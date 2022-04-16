@@ -225,7 +225,7 @@ class TatumAPIinteractions:
 
         self.__timer.wait_until_allowed(include_reset=True)
         try:
-            raw_response = api_method(*api_method_args)
+            raw_response = api_method(*api_method_args, timeout=30)
         except Exception as e:
             logging.warning('Something went wrong while retrieving data from ' + api_url
                             + ' -- The Exception was: ' + repr(e))
