@@ -2,35 +2,35 @@ import logging
 import requests
 import json
 import pandas as pd
-# import xmltodict
 import time
 from pathlib import Path
 from urllib.parse import urlunsplit, urlencode
 from typing import Union
 from class_timer import Timer
+from class_percent_tracker import PercentTracker
 
 
-class TatumAPIinteractions:
+class MoralisAPIinteractions:
     """
-        This class provides the ability to interact with the Tatum API.
+        This class provides the ability to interact with the Moralis API.
     """
 
     # URL components
     __api_scheme = 'https'
-    __api_network_location = 'api-us-west1.tatum.io'
+    __api_network_location = 'deep-index.moralis.io'
 
     # default headers
     __request_headers = {
-        "Accept": "text/html",
-        "Accept-Language": "en-US,en;q=0.5",
-        "User-Agent": "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:97.0) Gecko/20100101 Firefox/97.0"
+        "Accept": "application/json"
     }
 
-    def __init__(self, full_path_to_credentials_file: Path, rate_limit: int = 5, page_size: int = 50):
+    def __init__(self, full_path_to_credentials_file: Path, rate_limit: int = 25, page_size: int = 50):
         """Initialize an instance of the class.
           Args:
             full_path_to_credentials_file: a json formatted file (as a posix path) that has API key.
-            rate_limit: the number of calls that one is allowed to make to the API per second. eg. 5
+            rate_limit: the number of calls that one is allowed to make to the API per second. On the free
+              account, the moralis documentation says 1500 requests per minute are allowed, which is
+              25 per second, so this is what I've set the default to.
             page_size: the number of items to get from the API, for calls where information
                 is being retrieved, and the API returns a certain number of objects per
                 page.
@@ -47,73 +47,104 @@ class TatumAPIinteractions:
         self.__reset_headers()
     # ------------------------ END FUNCTION ------------------------ #
 
-    def get_current_ethereum_block_number(self, testnet: str = "") -> int:
+    def get_nft_transfers(self,
+                          address: str,
+                          chain: str = "eth",
+                          format: str = "",
+                          direction: str = "") -> pd.DataFrame:
         """
-            This method gets the current block number.
-            NOTE: From my testing (not very thorough) it looks like the API
-                will always return the current block of mainnet, IF the api key used
-                is for mainnet - even if the headers specify a testnet. I'm guessing
-                the converse is also true; likely if a testnet api key is used,
-                the reply will be for testnet no matter what, but in that case, WHICH
-                testnet can be specified.
-            Args:
-              testnet: If this value is ommitted, then mainnet is used. Possible values are "ethereum-ropsten",
-                "ethereum-ropsten", "ethereum-rinkeby"
-            Returns:
-              The current block.
-        """
-        api_path = "/v3/ethereum/block/current"
-        if testnet:
-            header_to_add = {
-                "x-testnet-type": testnet
-            }
-            self.__sesh.headers.update(header_to_add)
-
-        block = self.__make_one_api_call(self.__api_network_location,
-                                         api_path)
-
-        if testnet:
-            # in case other methods still need to use the requests session, we'll reset the headers,
-            # which in this case means removing the 'testnet' header if it was provided
-            self.__reset_headers()
-
-        return block
-    # ------------------------ END FUNCTION ------------------------ #
-
-    def get_multi_token_transactions_by_address(self,
-                                                account_address: str,
-                                                contract_address: str,
-                                                chain: str = "ETH",
-                                                from_block: int = -1,
-                                                to_block: int = -1) -> pd.DataFrame:
-        """
-          This method gets all the transactions for a multitoken type of contract (example, on Ethereum
-          an ERC1155 type of contract) for a specific address that has interacted with that contract.
+          This method gets all the NFT transactions that a particular address has been involved in (sending and/or
+          receiving.
           Args:
-              account_address: the account that one is interested in looking at the transactions for (usually
+              address: the account that one is interested in looking at the transactions for (usually
                 an EOA, but not necessarily.)
-              contract_address: the address of the contract on the blockchain.
-              chain: a string that represents the chain one is interested in.
-              from_block: the starting block, eg. one is interested only in transactions that happened
-                after block number X
-              to_block: if one is only interested in transactions up to a certain point, this parameter
-                can be used to specify an upper limit on the blocks.
+              chain: a string that represents the chain one is interested in. Eg, eth, ropsten, matic, etc.
+              format: 'decimal' or 'hex' (decimal is default).
+              direction: 'to', 'from', or 'both' (both is the default)
           Returns:
               A pandas dataframe with the data.
         """
-        api_path = f"/v3/multitoken/transaction/{chain}/{account_address}/{contract_address}"
+        api_path = f"/api/v2/{address}/nft/transfers"
+
         dict_api_query_params = {
-            "pageSize": self.__page_size
+            "chain": chain
         }
-        if from_block > -1:
-            dict_api_query_params["from"] = from_block
-        if to_block > -1:
-            dict_api_query_params["to"] = to_block
+        if format:
+            dict_api_query_params["format"] = format
+        if direction:
+            dict_api_query_params["direction"] = direction
 
         return self.__get_full_data_set_from_api(self.__api_network_location,
                                                  api_path,
                                                  dict_api_query_params)
     # ------------------------ END FUNCTION ------------------------ #
+
+    def get_an_nft_tokens_metadata(self,
+                                   contract_address: str,
+                                   token_id: str,
+                                   chain: str = "eth",
+                                   format: str = "") -> dict:
+        """
+          This method gets the metadata for a specific token in a contract.
+          Args:
+              contract_address: the address of the NFT contract
+              token_id: the id of the NFT for which to get the metadata.
+              chain: a string that represents the chain one is interested in. Eg, eth, ropsten, matic, etc.
+              format: 'decimal' or 'hex' (decimal is default).
+          Returns:
+              A dictionary with the data.
+        """
+        api_path = f"/api/v2/nft/{contract_address}/{token_id}"
+
+        dict_api_query_params = {
+            "chain": chain
+        }
+        if format:
+            dict_api_query_params["format"] = format
+
+        return self.__make_one_api_call(self.__api_network_location,
+                                        api_path,
+                                        dict_api_query_params)
+    # ------------------------ END FUNCTION ------------------------ #
+
+    def get_many_nft_tokens_metadata(self,
+                                     contract_address: str,
+                                     token_ids: Union[list, set, tuple, pd.Series],
+                                     chain: str = "eth",
+                                     format: str = "") -> pd.DataFrame:
+        """
+          This method gets the metadata for several NFT tokens.
+          Args:
+              contract_address: the account that one is interested in looking at the transactions for (usually
+                an EOA, but not necessarily.)
+              token_ids: any iterable where each item is a string representing a token id.
+              chain: a string that represents the chain one is interested in. Eg, eth, ropsten, matic, etc.
+              format: 'decimal' or 'hex' (decimal is default).
+          Returns:
+              A pandas dataframe with the data.
+        """
+        dict_api_query_params = {
+            "chain": chain
+        }
+        if format:
+            dict_api_query_params["format"] = format
+
+        list_of_tokens = []
+        percent_tracker = PercentTracker(len(token_ids), int_output_every_x_percent=5)
+        counter = 0
+        for item in token_ids:
+            list_of_tokens.append(
+                self.get_an_nft_tokens_metadata(contract_address,
+                                                item,
+                                                chain,
+                                                format)
+            )
+            counter += 1
+            percent_tracker.update_progress(counter,
+                                            str_description_to_include_in_logging="Getting a list of NFT's metadata.")
+        return pd.DataFrame(list_of_tokens)
+    # ------------------------ END FUNCTION ------------------------ #
+
 
     def __get_full_data_set_from_api(self,
                                      api_endpoint: str,
@@ -126,8 +157,8 @@ class TatumAPIinteractions:
           This method is .
           Args:
               api_endpoint: This is equivalent, in URL terminology, as the 'network location'. For
-               example "api-us-west1.tatum.io"
-              api_url_path: the path in the URL call to the API as specified by Tatum documentation. For
+               example "deep-index.moralis.io"
+              api_url_path: the path in the URL call to the API as specified by Moralis documentation. For
                 example to get a list of transactions an address has performed on a particular contract:
                 "/v3/multitoken/transaction/{chain}/{address}/{tokenAddress}"
               dict_api_parameters: a dictionary representing the parameters to be sent to the api as a query,
@@ -142,31 +173,48 @@ class TatumAPIinteractions:
               A list of dictionaries containing the response from the API, or a dataframe if the correct
               flag is set in the method's parameters.
         """
-        
-        there_are_likely_more_results = True
-        dict_api_query_parameters['offset'] = 0
+
+        dict_api_query_parameters['limit'] = num_items_per_page
         full_data_set = []
-        page_counter = 1
+        there_are_likely_more_results = True
+        is_first_loop_iteration = True
+        # Declare a 'dummy' percent tracker object, which will be redefined below
+        # once the size of the dataset is known. However, we declare it here so
+        # things like pylama/pycharm won't complain about it maybe being used
+        # without being declared, as they would if we only declared it within an IF.
+        percent_tracker = ''
 
         while there_are_likely_more_results:
-            # # check to make sure a variable on disk hasn't been told that the program should stop
-            # if not self.__var_mgr.var_retrieve(self.__str_execution_may_go_on_jobs):
-            #     return
+            api_response = self.__make_one_api_call(api_endpoint,
+                                                    api_url_path,
+                                                    dict_api_parameters=dict_api_query_parameters)
+            # After the first iteration of the loop, we get our first response from the API
+            # which allows us to get information like the size of the dataset, which allows
+            # us to setup a percent tracker, for example.
+            if is_first_loop_iteration:
+                size_data_set = api_response['total']
+                if size_data_set > 0:
+                    percent_tracker = PercentTracker(api_response['total'])
+                is_first_loop_iteration = False
 
-            one_page_data = self.__make_one_api_call(api_endpoint,
-                                                     api_url_path,
-                                                     dict_api_parameters=dict_api_query_parameters)
-            # Tatum does not provide any pagination info in its response
-            # so all we can do is check if the next page still has data in it
-            if one_page_data:
+            # There are two ways we can tell if there are more results that need to be fetched:
+            # When all the results have been returned, the list at api_response['result'] will be empty,
+            # and the cursor at api_response['cursor'] will be the empty string.
+            # Either can be used to determine if the loop should end. One can also use the number of items
+            # per ages in conjunctions with 'offset' to do pagination, but cursors get rid of the risk of
+            # missing/duplicate items when a data set might be changing.
+            cursor = api_response['cursor']
+            if cursor:
                 # add the result to the running tally
-                full_data_set.extend(one_page_data)
-                dict_api_query_parameters['offset'] += num_items_per_page
-                if log_progress:
-                    logging.info(f"Fetching page {page_counter}.")
-                page_counter += 1
+                full_data_set.extend(api_response['result'])
+                dict_api_query_parameters["cursor"] = cursor
             else:
                 there_are_likely_more_results = False
+
+            if percent_tracker:
+                percent_tracker.update_progress(len(full_data_set),
+                                                str_description_to_include_in_logging="done retreiving data from"
+                                                                                      "the current Moralis API call")
 
         if 'dataframe' in return_as:
             return pd.DataFrame(full_data_set)
@@ -185,8 +233,8 @@ class TatumAPIinteractions:
           Make 1 call (pagination should be handled by the caller).
           Args:
               api_endpoint: This is equivalent, in URL terminology, as the 'network location'. For
-               example "api-us-west1.tatum.io"
-              api_url_path: the path in the URL call to the API as specified by Tatum documentation. For
+               example "deep-index.moralis.io"
+              api_url_path: the path in the URL call to the API as specified by Moralis documentation. For
                 example to get a list of transactions an address has performed on a particular contract:
                 "/v3/multitoken/transaction/{chain}/{address}/{tokenAddress}"
               dict_api_parameters: a dictionary representing the parameters to be sent to the api as a query,
@@ -297,5 +345,5 @@ class TatumAPIinteractions:
             dict_creds = json.load(creds_file)
         self.__sesh.headers.clear()
         self.__sesh.headers.update(self.__request_headers)
-        self.__sesh.headers.update({"x-api-key": dict_creds['api_key_free_mainnet']})
+        self.__sesh.headers.update({"x-api-key": dict_creds['api_key']})
     # ------------------------ END FUNCTION ------------------------ #
