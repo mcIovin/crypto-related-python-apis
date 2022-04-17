@@ -1,18 +1,20 @@
+from os import getenv
 import logging
-import requests
 import json
-import pandas as pd
 import time
-from pathlib import Path
+import requests
+import pandas as pd
 from urllib.parse import urlunsplit, urlencode
 from typing import Union
-from class_timer import Timer
-from class_percent_tracker import PercentTracker
+from helperclass_timer import Timer
+from helperclass_percent_tracker import PercentTracker
 
 
 class MoralisAPIinteractions:
     """
         This class provides the ability to interact with the Moralis API.
+        NOTE - this class expects to be able to access the Moralis API key in an environment
+        variable called 'MORALIS_KEY'.
     """
 
     # URL components
@@ -24,10 +26,11 @@ class MoralisAPIinteractions:
         "Accept": "application/json"
     }
 
-    def __init__(self, full_path_to_credentials_file: Path, rate_limit: int = 1, page_size: int = 50):
+    def __init__(self, rate_limit: int = 1, page_size: int = 50):
         """Initialize an instance of the class.
+        NOTE - this class expects to be able to access the Moralis API key in an environment
+        variable called 'MORALIS_KEY'.
           Args:
-            full_path_to_credentials_file: a json formatted file (as a posix path) that has API key.
             rate_limit: the number of calls that one is allowed to make to the API per second. On the free
               account, the moralis documentation says 1500 requests per minute are allowed, which is
               25 per second; however, each API has its own 'cost'. For example each call about NFT
@@ -38,7 +41,6 @@ class MoralisAPIinteractions:
                 is being retrieved, and the API returns a certain number of objects per
                 page.
           """
-        self.__path_to_file_with_creds = full_path_to_credentials_file
         self.__page_size = page_size
         # start the timer that keeps track of whether an API call is allowed
         # yet or not based on the rate limit
@@ -451,9 +453,7 @@ class MoralisAPIinteractions:
     # ------------------------ END FUNCTION ------------------------ #
 
     def __reset_headers(self):
-        with open(self.__path_to_file_with_creds, mode='r') as creds_file:
-            dict_creds = json.load(creds_file)
         self.__sesh.headers.clear()
         self.__sesh.headers.update(self.__request_headers)
-        self.__sesh.headers.update({"x-api-key": dict_creds['api_key']})
+        self.__sesh.headers.update({"x-api-key": getenv('MORALIS_KEY')})
     # ------------------------ END FUNCTION ------------------------ #
