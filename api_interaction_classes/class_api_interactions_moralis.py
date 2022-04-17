@@ -323,7 +323,7 @@ class MoralisAPIinteractions:
 
             if percent_tracker:
                 percent_tracker.update_progress(len(full_data_set),
-                                                str_description_to_include_in_logging="done retreiving data from"
+                                                str_description_to_include_in_logging="done retreiving data from "
                                                                                       "the current Moralis API call")
 
         if 'dataframe' in return_as:
