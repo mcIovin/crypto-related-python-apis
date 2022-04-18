@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlunsplit, urlencode
 from typing import Union
-from class_timer import Timer
+from helperclass_timer import Timer
 
 
 class TatumAPIinteractions:
