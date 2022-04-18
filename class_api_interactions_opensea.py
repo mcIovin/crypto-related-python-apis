@@ -5,8 +5,8 @@ import time
 import pandas as pd
 from urllib.parse import urlunsplit, urlencode
 from typing import Union
-from class_timer import Timer
-from class_percent_tracker import PercentTracker
+from helperclass_timer import Timer
+from helperclass_percent_tracker import PercentTracker
 
 
 class OpenseaAPIinteractions:
