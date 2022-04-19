@@ -85,10 +85,10 @@ class MoralisAPIinteractions:
     # ------------------------ END FUNCTION ------------------------ #
 
     def resync_an_nft_tokens_metadata(self,
-                            contract_address: str,
-                            token_id: str,
-                            chain: str = "eth",
-                            print_api_response_to_console: bool = False):
+                                      contract_address: str,
+                                      token_id: str,
+                                      chain: str = "eth",
+                                      log_api_response_message: bool = False):
         """
           This method gets all the NFT transactions that a particular address has been involved in (sending and/or
           receiving.
@@ -96,7 +96,7 @@ class MoralisAPIinteractions:
               contract_address: the address of the NFT contract
               token_id: the id of the NFT for which to resync the metadata
               chain: a string that represents the chain one is interested in. Eg, eth, ropsten, matic, etc.
-              print_api_response_to_console: whether the api's response should be shown on the console or not,
+              log_api_response_message: whether the api's response should be shown on the console or not,
                 which can be quite useful, but also quite noisy if querying repeatedly.
         """
         api_path = f"/api/v2/nft/{contract_address}/{token_id}/metadata/resync"
@@ -121,15 +121,15 @@ class MoralisAPIinteractions:
             logging.warning(f"Did not receive the expected 'completed' response when resyncing metadata "
                             f"for token_id {token_id}")
 
-        if print_api_response_to_console:
-            print(response)
+        if log_api_response_message:
+            logging.info(response)
     # ------------------------ END FUNCTION ------------------------ #
 
     def resync_many_nft_tokens_metadata(self,
                                         contract_address: str,
                                         token_ids: Union[list, set, tuple, pd.Series],
                                         chain: str = "eth",
-                                        print_api_response_to_console: bool = False,
+                                        log_api_response: bool = False,
                                         sleep_time_between_requests: float = 0):
         """
           This method gets the metadata for several NFT tokens.
@@ -138,7 +138,7 @@ class MoralisAPIinteractions:
                 an EOA, but not necessarily.)
               token_ids: any iterable where each item is a string representing a token id.
               chain: a string that represents the chain one is interested in. Eg, eth, ropsten, matic, etc.
-              print_api_response_to_console: whether the api's response should be shown on the console or not,
+              log_api_response: whether the api's response should be shown on the console or not,
                 which can be quite useful, but also quite noisy if querying repeatedly.
               sleep_time_between_requests: resyncing NFT metadata seems to trigger a more sensitive rate limit
                 than other functions. This is based on experience; I can't find this in their documentation. So
@@ -148,7 +148,7 @@ class MoralisAPIinteractions:
         percent_tracker = PercentTracker(len(token_ids), int_output_every_x_percent=5)
         counter = 0
         for item in token_ids:
-            self.resync_an_nft_tokens_metadata(contract_address, item, chain, print_api_response_to_console)
+            self.resync_an_nft_tokens_metadata(contract_address, item, chain, log_api_response)
             if sleep_time_between_requests:
                 time.sleep(sleep_time_between_requests)
             counter += 1
