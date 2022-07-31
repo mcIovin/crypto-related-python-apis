@@ -72,33 +72,44 @@ class OpenseaAPIinteractions:
 
     def get_many_nft_tokens_metadata(self,
                                      contract_address: str,
-                                     opensea_token_uri_identifiers: Union[list, set, tuple, pd.Series],
-                                     api_format: str = "json") -> pd.DataFrame:
+                                     opensea_token_identifiers: Union[list, set, tuple, pd.Series],
+                                     api_format: str = "json",
+                                     return_as: str = "dataframe") -> Union[pd.DataFrame, list]:
         """
           This method gets the metadata for several NFT tokens.
           Args:
               contract_address: the account that one is interested in looking at the transactions for (usually
                 an EOA, but not necessarily.)
-              opensea_token_uri_identifiers: any iterable where each item is the odd identifier that opensea
-                puts at the end of each token URI path.
+              opensea_token_identifiers: any iterable where each item is a token ID.
               api_format: can be set to json (in the GIU, opensea gives two options: json or api)
+              return_as: this parameter dictates whether the data that the method has gathered should
+                be returned as a list of dictionaries, or as a pandas dataframe. Accpetable values
+                are 'list' or 'dataframe'. Dataframes is the default.
           Returns:
               A pandas dataframe with the data.
         """
 
         list_of_tokens = []
-        percent_tracker = PercentTracker(len(opensea_token_uri_identifiers), int_output_every_x_percent=5)
+        percent_tracker = PercentTracker(len(opensea_token_identifiers), int_output_every_x_percent=5)
         counter = 0
-        for item in opensea_token_uri_identifiers:
-            list_of_tokens.append(
-                self.get_an_nft_tokens_metadata(contract_address,
+        for item in opensea_token_identifiers:
+            dict_metadata = self.get_an_nft_tokens_metadata(contract_address,
                                                 item,
                                                 api_format)
-            )
+            # The metadata returned does not include the token ID. Downstream methods wanting to use
+            # this data will almost certainly need the unique identifier, so we manually insert the
+            # ID as well into the dict.
+            dict_metadata["token_id"] = item
+            list_of_tokens.append(dict_metadata)
             counter += 1
             percent_tracker.update_progress(counter,
-                                            str_description_to_include_in_logging="Getting a list of NFT's metadata.")
-        return pd.DataFrame(list_of_tokens)
+                                            show_time_remaining_estimate=True,
+                                            str_description_to_include_in_logging="Getting a list of NFT's metadata"
+                                                                                  " from OpenSea tokenURIs.")
+        if return_as is 'list':
+            return list_of_tokens
+        else:
+            return pd.DataFrame(list_of_tokens)
     # ------------------------ END FUNCTION ------------------------ #
 
     def __make_one_api_call(self,

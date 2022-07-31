@@ -1,3 +1,4 @@
+import json
 import logging
 import pandas as pd
 from urllib.parse import urlunsplit, urlencode
@@ -45,7 +46,8 @@ class SeleniumOnOpensea:
     def get_many_nfts_properties(self,
                                  contract_address: str,
                                  token_ids: Union[list, set, tuple, pd.Series],
-                                 include_numeric_traits: bool = True) -> pd.DataFrame:
+                                 include_numeric_traits: bool = True,
+                                 log_counter: bool = True) -> pd.DataFrame:
 
         # We'll make a copy of the iterable (with the tokens), to keep track of which ones
         # have been successfully processed.
@@ -64,6 +66,9 @@ class SeleniumOnOpensea:
             logging.info(f"Starting attempt #{attempt_number} to get the NFT properties.")
 
             for item in token_ids:
+                if log_counter:
+                    logging.info(f"Scraping the next item from OpenSea. Loop"
+                                 f" counter is {counter}, and item ID is {item}")
                 token_processing_successful = True
                 try:
                     list_results.append(self.get_an_nfts_properties(contract_address, item, include_numeric_traits))
@@ -90,7 +95,17 @@ class SeleniumOnOpensea:
 
             attempt_number += 1
 
-        return pd.DataFrame(list_results)
+        df_to_return = pd.DataFrame
+        try:
+            df_to_return = pd.DataFrame(list_results)
+        except Exception as e:
+            logging.error(f"Unable to convert list of downloaded metadata into a dataframe. Dumping"
+                          f" list to disk and exiting.")
+            with open('list_that_could_not_be_converted_to_df.json', mode='w') as f:
+                json.dump(list_results, f, indent=2)
+            exit(0)
+
+        return df_to_return
     # ------------------------ END FUNCTION ------------------------ #
 
     def get_an_nfts_properties(self,
