@@ -84,6 +84,33 @@ class MoralisAPIinteractions:
                                                  dict_api_query_params)
     # ------------------------ END FUNCTION ------------------------ #
 
+    def get_nfts_in_a_contract(self,
+                          address: str,
+                          chain: str = "eth",
+                          format: str = "") -> pd.DataFrame:
+        """
+          This method gets all the NFTs that exist in a contract according to the Moralis API.
+          Args:
+              address: the account that one is interested in looking at the transactions for (usually
+                an EOA, but not necessarily.)
+              chain: a string that represents the chain one is interested in. Eg, eth, ropsten, matic, etc.
+              format: 'decimal' or 'hex' (decimal is default).
+          Returns:
+              A pandas dataframe with the data.
+        """
+        api_path = f"/api/v2/nft/{address}"
+
+        dict_api_query_params = {
+            "chain": chain
+        }
+        if format:
+            dict_api_query_params["format"] = format
+
+        return self.__get_full_data_set_from_api(self.__api_network_location,
+                                                 api_path,
+                                                 dict_api_query_params)
+    # ------------------------ END FUNCTION ------------------------ #
+
     def resync_an_nft_tokens_metadata(self,
                                       contract_address: str,
                                       token_id: str,
@@ -300,16 +327,21 @@ class MoralisAPIinteractions:
             api_response = self.__make_one_api_call(api_endpoint,
                                                     api_url_path,
                                                     dict_api_parameters=dict_api_query_parameters)
+
+            size_data_set = api_response['total']
             # After the first iteration of the loop, we get our first response from the API
             # which allows us to get information like the size of the dataset, which allows
             # us to setup a percent tracker, for example.
             if is_first_loop_iteration:
-                size_data_set = api_response['total']
                 if size_data_set > 0:
                     percent_tracker = PercentTracker(api_response['total'])
                 is_first_loop_iteration = False
 
-            # There are two ways we can tell if there are more results that need to be fetched:
+            if size_data_set > 0:
+                # add the result to the running tally
+                full_data_set.extend(api_response['result'])
+
+            # There are several ways we can tell if there are more results that need to be fetched:
             # When all the results have been returned, the list at api_response['result'] will be empty,
             # and the cursor at api_response['cursor'] will be the empty string.
             # Either can be used to determine if the loop should end. One can also use the number of items
@@ -317,8 +349,6 @@ class MoralisAPIinteractions:
             # missing/duplicate items when a data set might be changing.
             cursor = api_response['cursor']
             if cursor:
-                # add the result to the running tally
-                full_data_set.extend(api_response['result'])
                 dict_api_query_parameters["cursor"] = cursor
             else:
                 there_are_likely_more_results = False
