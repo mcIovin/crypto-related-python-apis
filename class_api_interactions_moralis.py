@@ -227,15 +227,16 @@ class MoralisAPIinteractions:
         # to the top level parent dictionary. This is useful when multiple tokens are queried, because
         # if they are placed in a structure like a dataframe, each of these fields will have its own
         # column.
-        dict_metadata_from_token_uri = json.loads(dict_nft_metadata['metadata'])
-        for item in list_of_metadata_fields_to_extract:
-            if item in dict_metadata_from_token_uri:
-                dict_nft_metadata[item] = dict_metadata_from_token_uri[item]
-            else:
-                # Even if the field does not exist in the returned metadata json object
-                # we'll add it as an empty string to the dictionary to be returned
-                # for consistency.
-                dict_nft_metadata[item] = None
+        if 'metadata' in dict_nft_metadata:
+            dict_metadata_from_token_uri = json.loads(dict_nft_metadata['metadata'])
+            for item in list_of_metadata_fields_to_extract:
+                if item in dict_metadata_from_token_uri:
+                    dict_nft_metadata[item] = dict_metadata_from_token_uri[item]
+                else:
+                    # Even if the field does not exist in the returned metadata json object
+                    # we'll add it as an empty string to the dictionary to be returned
+                    # for consistency.
+                    dict_nft_metadata[item] = None
 
         return dict_nft_metadata
     # ------------------------ END FUNCTION ------------------------ #
@@ -271,13 +272,16 @@ class MoralisAPIinteractions:
         percent_tracker = PercentTracker(len(token_ids), int_output_every_x_percent=5)
         counter = 0
         for item in token_ids:
-            list_of_tokens.append(
-                self.get_an_nft_tokens_metadata(contract_address,
+            # I used to simply add the reply received, but at some point, something changed
+            # at Moralis and they started returning empty dictionaries for some queries sometimes
+            # so now I check that the return does contain data before appending it.
+            metadata = self.get_an_nft_tokens_metadata(contract_address,
                                                 item,
                                                 list_of_metadata_fields_to_extract,
                                                 chain,
                                                 format)
-            )
+            if metadata:
+                list_of_tokens.append(metadata)
             counter += 1
             percent_tracker.update_progress(counter,
                                             show_time_remaining_estimate=True,
