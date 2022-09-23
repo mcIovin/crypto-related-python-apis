@@ -26,7 +26,7 @@ class MoralisAPIinteractions:
         "Accept": "application/json"
     }
 
-    def __init__(self, rate_limit: int = 1, page_size: int = 50):
+    def __init__(self, rate_limit: float = 1.0, page_size: int = 50):
         """Initialize an instance of the class.
         NOTE - this class expects to be able to access the Moralis API key in an environment
         variable called 'MORALIS_KEY'.
@@ -115,7 +115,7 @@ class MoralisAPIinteractions:
                                       contract_address: str,
                                       token_id: str,
                                       chain: str = "eth",
-                                      log_api_response_message: bool = False):
+                                      log_api_response_message: bool = False) -> bool:
         """
           This method gets all the NFT transactions that a particular address has been involved in (sending and/or
           receiving.
@@ -125,6 +125,7 @@ class MoralisAPIinteractions:
               chain: a string that represents the chain one is interested in. Eg, eth, ropsten, matic, etc.
               log_api_response_message: whether the api's response should be shown on the console or not,
                 which can be quite useful, but also quite noisy if querying repeatedly.
+          :returns A boolean indicating if problems were encountered during the resync.
         """
         api_path = f"/api/v2/nft/{contract_address}/{token_id}/metadata/resync"
 
@@ -150,6 +151,8 @@ class MoralisAPIinteractions:
 
         if log_api_response_message:
             logging.info(response)
+
+        return there_was_a_problem
     # ------------------------ END FUNCTION ------------------------ #
 
     def resync_many_nft_tokens_metadata(self,
@@ -157,7 +160,8 @@ class MoralisAPIinteractions:
                                         token_ids: Union[list, set, tuple, pd.Series],
                                         chain: str = "eth",
                                         log_api_response: bool = False,
-                                        sleep_time_between_requests: float = 0):
+                                        sleep_time_between_requests: float = 0,
+                                        num_retry_rounds = 3):
         """
           This method gets the metadata for several NFT tokens.
           Args:
@@ -171,18 +175,50 @@ class MoralisAPIinteractions:
                 than other functions. This is based on experience; I can't find this in their documentation. So
                 this parameter allows for a certain amount of seconds (or fraction thereof) to be waited for, before
                 resyncing the metadata of the next token in the iterable.
+              num_retry_rounds: There are sometimes issues when requesting a re-sync with Moralis. This integer
+                asks the code to try again a certain number of times, for any token ids where an issue was
+                encountered during the resync. NOTE: num_retry_rounds must be between 0 and 3 inclusive. If a number
+                is given out of that range, the default value of 3 will be used.
         """
-        percent_tracker = PercentTracker(len(token_ids), int_output_every_x_percent=5)
-        counter = 0
-        for item in token_ids:
-            self.resync_an_nft_tokens_metadata(contract_address, item, chain, log_api_response)
-            if sleep_time_between_requests:
-                time.sleep(sleep_time_between_requests)
-            counter += 1
-            percent_tracker.update_progress(counter,
-                                            show_time_remaining_estimate=True,
-                                            str_description_to_include_in_logging="Resyncing metadata for a list "
-                                                                                  "of NFT tokens.")
+
+        # I've found that even when respecting the Moralis API rate limits they still sometimes fail some
+        # calls with a 'rate limit exceeded' message. So the loop below does the first initial pass
+        # of re-syncing the metadata, but then also, if requested, re-tries several times (as dictated
+        # by one of the parameters of this method) to re-sync the data for the token ids that previously
+        # failed.
+        num_retry_rounds = num_retry_rounds if (0 <= num_retry_rounds <= 3) else 3
+        # We want at least one pass of the loop, so below we add 1 to the number of retries
+        num_loop_iterations = num_retry_rounds + 1
+        rounds_counter = 0
+        set_of_token_ids_to_resync = set(token_ids).copy()
+        while rounds_counter < num_loop_iterations:
+            # The first pass, when the rounds_counter is 0, is not really a 'retry', so the logging message
+            # below is not displayed on the first iteration of the loop.
+            if rounds_counter != 0 and len(set_of_token_ids_to_resync) > 0:
+                logging.info(f"Round {rounds_counter} of {num_retry_rounds} -> trying to resync the tokens "
+                             f"that previously failed.")
+
+            percent_tracker = PercentTracker(len(set_of_token_ids_to_resync), int_output_every_x_percent=5)
+            item_counter = 0
+            set_of_tokens_with_issues = set()
+
+            for item in set_of_token_ids_to_resync:
+                problem_encountered_during_resync = self.resync_an_nft_tokens_metadata(contract_address, item, chain,
+                                                                                       log_api_response)
+                if problem_encountered_during_resync:
+                    set_of_tokens_with_issues.add(item)
+
+                if sleep_time_between_requests:
+                    time.sleep(sleep_time_between_requests)
+
+                item_counter += 1
+                percent_tracker.update_progress(item_counter,
+                                                show_time_remaining_estimate=True,
+                                                str_description_to_include_in_logging="Resyncing metadata for a list "
+                                                                                      "of NFT tokens.")
+
+            set_of_token_ids_to_resync = set_of_tokens_with_issues
+            rounds_counter += 1
     # ------------------------ END FUNCTION ------------------------ #
 
     def get_an_nft_tokens_metadata(self,
@@ -228,15 +264,18 @@ class MoralisAPIinteractions:
         # if they are placed in a structure like a dataframe, each of these fields will have its own
         # column.
         if 'metadata' in dict_nft_metadata:
-            dict_metadata_from_token_uri = json.loads(dict_nft_metadata['metadata'])
-            for item in list_of_metadata_fields_to_extract:
-                if item in dict_metadata_from_token_uri:
-                    dict_nft_metadata[item] = dict_metadata_from_token_uri[item]
-                else:
-                    # Even if the field does not exist in the returned metadata json object
-                    # we'll add it as an empty string to the dictionary to be returned
-                    # for consistency.
-                    dict_nft_metadata[item] = None
+            if dict_nft_metadata['metadata'] is None:
+                logging.warning(f"Metadata field returned for token {dict_nft_metadata['token_id']} was: None")
+            else:
+                dict_metadata_from_token_uri = json.loads(dict_nft_metadata['metadata'])
+                for item in list_of_metadata_fields_to_extract:
+                    if item in dict_metadata_from_token_uri:
+                        dict_nft_metadata[item] = dict_metadata_from_token_uri[item]
+                    else:
+                        # Even if the field does not exist in the returned metadata json object
+                        # we'll add it as an empty string to the dictionary to be returned
+                        # for consistency.
+                        dict_nft_metadata[item] = None
 
         return dict_nft_metadata
     # ------------------------ END FUNCTION ------------------------ #
@@ -276,10 +315,10 @@ class MoralisAPIinteractions:
             # at Moralis and they started returning empty dictionaries for some queries sometimes
             # so now I check that the return does contain data before appending it.
             metadata = self.get_an_nft_tokens_metadata(contract_address,
-                                                item,
-                                                list_of_metadata_fields_to_extract,
-                                                chain,
-                                                format)
+                                                       item,
+                                                       list_of_metadata_fields_to_extract,
+                                                       chain,
+                                                       format)
             if metadata:
                 list_of_tokens.append(metadata)
             counter += 1
@@ -303,7 +342,7 @@ class MoralisAPIinteractions:
                example "deep-index.moralis.io"
               api_url_path: the path in the URL call to the API as specified by Moralis documentation. For
                 example to get a list of transactions an address has performed on a particular contract:
-                "/v3/multitoken/transaction/{chain}/{address}/{tokenAddress}"
+                "/v2/multitoken/transaction/{chain}/{address}/{tokenAddress}"
               dict_api_parameters: a dictionary representing the parameters to be sent to the api as a query,
                 so all the filters, the sorting, the fields to include, etc.
                 In other words, all the things that usually go in a URL after the '?' and all the '&'
@@ -338,7 +377,8 @@ class MoralisAPIinteractions:
             # us to setup a percent tracker, for example.
             if is_first_loop_iteration:
                 if size_data_set > 0:
-                    percent_tracker = PercentTracker(api_response['total'])
+                    if log_progress:
+                        percent_tracker = PercentTracker(api_response['total'])
                 is_first_loop_iteration = False
 
             if size_data_set > 0:
@@ -359,7 +399,7 @@ class MoralisAPIinteractions:
 
             if percent_tracker:
                 percent_tracker.update_progress(len(full_data_set),
-                                                str_description_to_include_in_logging="done retreiving data from "
+                                                str_description_to_include_in_logging="done retrieving data from "
                                                                                       "the current Moralis API call")
 
         if 'dataframe' in return_as:
@@ -382,7 +422,7 @@ class MoralisAPIinteractions:
                example "deep-index.moralis.io"
               api_url_path: the path in the URL call to the API as specified by Moralis documentation. For
                 example to get a list of transactions an address has performed on a particular contract:
-                "/v3/multitoken/transaction/{chain}/{address}/{tokenAddress}"
+                "/v2/multitoken/transaction/{chain}/{address}/{tokenAddress}"
               dict_api_parameters: a dictionary representing the parameters to be sent to the api as a query,
                 so all the filters, the sorting, the fields to include, etc.
                 In other words, all the things that usually go in a URL after the '?' and all the '&'

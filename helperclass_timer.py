@@ -10,7 +10,7 @@ class Timer:
         limits, but I suspect it will grow to have other functionality as well.
     """
 
-    def __init__(self, rate_limit: int = 5):
+    def __init__(self, rate_limit: float = 5):
         """
         Initialize an instance of the class.
           Args:

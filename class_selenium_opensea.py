@@ -160,8 +160,8 @@ class SeleniumOnOpensea:
 
             percent_tracker.update_progress(counter,
                                             show_time_remaining_estimate=True,
-                                            str_description_to_include_in_logging="Getting properties for a "
-                                                                                  "list of NFTs.")
+                                            str_description_to_include_in_logging="Refreshing metadata on OpenSea "
+                                                                                  "for a list of NFTs.")
     # ------------------------ END FUNCTION ------------------------ #
 
     def refresh_an_nft(self, token_id: str, network: str = 'ethereum'):
